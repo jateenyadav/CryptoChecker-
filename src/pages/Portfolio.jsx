@@ -6,6 +6,8 @@ import { usePortfolio } from "../context/PortfolioContext.jsx";
 import { useDebounce } from "../hooks/useDebounce.js";
 import { formatPrice, formatPercent, classNames } from "../utils/format.js";
 import { Spinner, ErrorMessage, EmptyState } from "../components/Status.jsx";
+import AiInsight from "../components/AiInsight.jsx";
+import { fetchPortfolioInsight } from "../api/insights.js";
 
 export default function Portfolio() {
   const { currency } = useCurrency();
@@ -103,7 +105,7 @@ export default function Portfolio() {
         <div>
           <h1 className="page-title">Portfolio</h1>
           <p className="page-sub">
-            Track your holdings and live value. Stored locally in your browser.
+            Track your holdings and live value. Synced to your account via the API.
           </p>
         </div>
         {count > 0 && (
@@ -151,6 +153,12 @@ export default function Portfolio() {
               <span className="summary-card__value">{count}</span>
             </div>
           </section>
+
+          <AiInsight
+            title="AI Portfolio Insight"
+            cta="Analyse my portfolio"
+            trigger={() => fetchPortfolioInsight(currency)}
+          />
 
           {loading && <Spinner label="Loading prices…" />}
           {error && !loading && <ErrorMessage message={error} onRetry={loadPrices} />}

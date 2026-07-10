@@ -1,82 +1,57 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-
-const PortfolioContext = createContext(null);
-const STORAGE_KEY = "cryptochecker:portfolio";
-
 /**
- * Holdings are stored as a map of { [coinId]: { amount, name, symbol, image } }.
- * We persist the lightweight coin metadata alongside the amount so the
- * Portfolio page can render rows even before live prices have loaded.
+ * Portfolio is now persisted server-side (Django + PostgreSQL) via RTK Query.
+ * Compatibility layer preserving the previous hook API:
+ *   { holdings, ids, setHolding, remove, clear, has, count }
+ * where `holdings` is a map of { [coinId]: { amount, name, symbol, image } }.
  */
-function load() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) : {};
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
-    return {};
-  }
-}
+import { useCallback, useMemo } from "react";
+import {
+  useGetPortfolioQuery,
+  useSetHoldingMutation,
+  useRemoveHoldingMutation,
+} from "../store/api.js";
 
 export function PortfolioProvider({ children }) {
-  const [holdings, setHoldings] = useState(load);
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(holdings));
-  }, [holdings]);
-
-  const setHolding = useCallback((coin, amount) => {
-    const numeric = Number(amount);
-    setHoldings((prev) => {
-      const next = { ...prev };
-      if (!numeric || numeric <= 0) {
-        delete next[coin.id];
-        return next;
-      }
-      next[coin.id] = {
-        amount: numeric,
-        name: coin.name,
-        symbol: coin.symbol,
-        image: coin.image,
-      };
-      return next;
-    });
-  }, []);
-
-  const remove = useCallback((id) => {
-    setHoldings((prev) => {
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
-  }, []);
-
-  const clear = useCallback(() => setHoldings({}), []);
-
-  const has = useCallback((id) => Boolean(holdings[id]), [holdings]);
-
-  const value = useMemo(
-    () => ({
-      holdings,
-      ids: Object.keys(holdings),
-      setHolding,
-      remove,
-      clear,
-      has,
-      count: Object.keys(holdings).length,
-    }),
-    [holdings, setHolding, remove, clear, has]
-  );
-
-  return (
-    <PortfolioContext.Provider value={value}>
-      {children}
-    </PortfolioContext.Provider>
-  );
+  return children;
 }
 
 export function usePortfolio() {
-  const ctx = useContext(PortfolioContext);
-  if (!ctx) throw new Error("usePortfolio must be used within PortfolioProvider");
-  return ctx;
+  const { data = [] } = useGetPortfolioQuery();
+  const [setHoldingMut] = useSetHoldingMutation();
+  const [removeHoldingMut] = useRemoveHoldingMutation();
+
+  const holdings = useMemo(() => {
+    const map = {};
+    for (const h of data) {
+      map[h.coin.coingecko_id] = {
+        amount: Number(h.amount),
+        name: h.coin.name,
+        symbol: h.coin.symbol,
+        image: h.coin.image,
+      };
+    }
+    return map;
+  }, [data]);
+
+  const ids = useMemo(() => Object.keys(holdings), [holdings]);
+
+  const setHolding = useCallback(
+    (coin, amount) => {
+      setHoldingMut({
+        coin: { id: coin.id, symbol: coin.symbol, name: coin.name, image: coin.image },
+        amount: Number(amount),
+      });
+    },
+    [setHoldingMut]
+  );
+
+  const remove = useCallback((id) => removeHoldingMut(id), [removeHoldingMut]);
+
+  const clear = useCallback(() => {
+    ids.forEach((id) => removeHoldingMut(id));
+  }, [ids, removeHoldingMut]);
+
+  const has = useCallback((id) => Boolean(holdings[id]), [holdings]);
+
+  return { holdings, ids, setHolding, remove, clear, has, count: ids.length };
 }

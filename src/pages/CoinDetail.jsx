@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { getCoin, getCoinChart } from "../api/coingecko.js";
+import { fetchCoinInsight } from "../api/insights.js";
 import { useCurrency } from "../context/CurrencyContext.jsx";
 import { useWatchlist } from "../context/WatchlistContext.jsx";
 import { usePortfolio } from "../context/PortfolioContext.jsx";
 import PriceChart from "../components/PriceChart.jsx";
+import AiInsight from "../components/AiInsight.jsx";
 import { Spinner, ErrorMessage } from "../components/Status.jsx";
 import { formatPrice, formatCompact, formatPercent, formatNumber } from "../utils/format.js";
 
@@ -254,6 +256,12 @@ export default function CoinDetail() {
           }
         />
       </section>
+
+      <AiInsight
+        title={`AI Insight — ${coin.name}`}
+        cta="Explain this coin"
+        trigger={() => fetchCoinInsight(id)}
+      />
 
       {supplyPct != null && (
         <section className="supply">

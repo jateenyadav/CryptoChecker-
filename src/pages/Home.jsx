@@ -7,6 +7,8 @@ import MarketStats from "../components/MarketStats.jsx";
 import Trending from "../components/Trending.jsx";
 import TopMovers from "../components/TopMovers.jsx";
 import { Spinner, ErrorMessage, EmptyState } from "../components/Status.jsx";
+import AiInsight from "../components/AiInsight.jsx";
+import { fetchMarketInsight } from "../api/insights.js";
 import { downloadCoinsCsv } from "../utils/csv.js";
 
 const PER_PAGE = 50;
@@ -94,6 +96,11 @@ export default function Home() {
   return (
     <>
       <MarketStats />
+      <AiInsight
+        title="AI Market Insight"
+        cta="Summarise the market"
+        trigger={fetchMarketInsight}
+      />
       <Trending />
       {!loading && !error && coins.length > 0 && <TopMovers coins={coins} />}
 

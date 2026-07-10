@@ -1260,3 +1260,54 @@ a:hover {
   }
 }
 
+/* ---- AI Insights panel ---- */
+.ai-insight {
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, var(--surface), var(--surface-2));
+  border-radius: var(--radius);
+  padding: 18px 20px;
+  margin: 18px 0;
+}
+
+.ai-insight__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.ai-insight__title {
+  margin: 0;
+  font-size: 1.05rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ai-insight__spark {
+  filter: saturate(1.4);
+}
+
+.ai-insight__hint,
+.ai-insight__meta {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin: 10px 0 0;
+}
+
+.ai-insight__content {
+  margin: 12px 0 0;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.ai-insight__error {
+  margin: 12px 0 0;
+  color: #e5484d;
+}
+
+.ai-insight__btn {
+  white-space: nowrap;
+}
+

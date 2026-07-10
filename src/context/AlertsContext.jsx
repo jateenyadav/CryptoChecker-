@@ -1,53 +1,48 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
-import { getSimplePrice } from "../api/coingecko.js";
-import { useCurrency } from "./CurrencyContext.jsx";
-
-const AlertsContext = createContext(null);
-const STORAGE_KEY = "cryptochecker:alerts";
-const POLL_MS = 60_000;
-
 /**
- * An alert is { id, coinId, name, symbol, image, direction: "above"|"below",
- * target, currency, createdAt, triggeredAt|null }.
+ * Alerts are now persisted server-side (Django + PostgreSQL) via RTK Query.
+ * This compatibility layer preserves the previous hook API:
+ *   { alerts, add, remove, reset, clearTriggered, count, pendingCount,
+ *     triggeredCount, permission, requestPermission }
  *
- * Alerts are evaluated client-side against live spot prices on an interval.
- * When the condition is met we mark the alert triggered and (if the user has
- * granted permission) raise a desktop notification.
+ * Desktop-notification permission remains a browser concern and stays local.
+ * Server alert rows expose `triggered_at`; we surface it as `triggeredAt` and
+ * keep a `coinId` field so existing components render unchanged.
  */
-function load() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function randomId() {
-  return Math.random().toString(36).slice(2) + Date.now().toString(36);
-}
+import { useCallback, useMemo, useState } from "react";
+import {
+  useGetAlertsQuery,
+  useAddAlertMutation,
+  useRemoveAlertMutation,
+} from "../store/api.js";
 
 export function AlertsProvider({ children }) {
-  const { currency } = useCurrency();
-  const [alerts, setAlerts] = useState(load);
+  return children;
+}
+
+export function useAlerts() {
+  const { data = [] } = useGetAlertsQuery();
+  const [addAlertMut] = useAddAlertMutation();
+  const [removeAlertMut] = useRemoveAlertMutation();
   const [permission, setPermission] = useState(
     typeof Notification !== "undefined" ? Notification.permission : "unsupported"
   );
-  const alertsRef = useRef(alerts);
-  alertsRef.current = alerts;
 
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(alerts));
-  }, [alerts]);
+  const alerts = useMemo(
+    () =>
+      data.map((a) => ({
+        id: a.id,
+        coinId: a.coin.coingecko_id,
+        name: a.coin.name,
+        symbol: a.coin.symbol,
+        image: a.coin.image,
+        direction: a.direction,
+        target: Number(a.target),
+        currency: a.currency,
+        createdAt: a.created_at,
+        triggeredAt: a.triggered_at,
+      })),
+    [data]
+  );
 
   const requestPermission = useCallback(async () => {
     if (typeof Notification === "undefined") return "unsupported";
@@ -64,133 +59,37 @@ export function AlertsProvider({ children }) {
     (coin, direction, target) => {
       const numeric = Number(target);
       if (!coin?.id || !numeric || numeric <= 0) return;
-      setAlerts((prev) => [
-        {
-          id: randomId(),
-          coinId: coin.id,
-          name: coin.name,
-          symbol: coin.symbol,
-          image: coin.image,
-          direction: direction === "below" ? "below" : "above",
-          target: numeric,
-          currency,
-          createdAt: Date.now(),
-          triggeredAt: null,
-        },
-        ...prev,
-      ]);
+      addAlertMut({
+        coin: { id: coin.id, symbol: coin.symbol, name: coin.name, image: coin.image },
+        direction: direction === "below" ? "below" : "above",
+        target: numeric,
+        currency: coin.currency || "usd",
+      });
     },
-    [currency]
+    [addAlertMut]
   );
 
-  const remove = useCallback((id) => {
-    setAlerts((prev) => prev.filter((a) => a.id !== id));
-  }, []);
+  const remove = useCallback((id) => removeAlertMut(id), [removeAlertMut]);
 
   const clearTriggered = useCallback(() => {
-    setAlerts((prev) => prev.filter((a) => !a.triggeredAt));
-  }, []);
+    alerts.filter((a) => a.triggeredAt).forEach((a) => removeAlertMut(a.id));
+  }, [alerts, removeAlertMut]);
 
-  const reset = useCallback((id) => {
-    setAlerts((prev) =>
-      prev.map((a) => (a.id === id ? { ...a, triggeredAt: null } : a))
-    );
-  }, []);
+  // Server owns trigger state; resetting a single alert isn't supported server-side.
+  const reset = useCallback(() => {}, []);
 
-  const notify = useCallback(
-    (alert, price) => {
-      if (typeof Notification === "undefined" || Notification.permission !== "granted") {
-        return;
-      }
-      const arrow = alert.direction === "above" ? "▲" : "▼";
-      try {
-        new Notification(`${alert.symbol?.toUpperCase()} price alert ${arrow}`, {
-          body: `${alert.name} is now ${price} (target ${alert.target} ${alert.currency.toUpperCase()})`,
-          icon: alert.image,
-        });
-      } catch {
-        /* notifications can throw in some environments; ignore */
-      }
-    },
-    []
-  );
+  const triggeredCount = alerts.filter((a) => a.triggeredAt).length;
 
-  // Poll live prices and evaluate pending alerts.
-  useEffect(() => {
-    let cancelled = false;
-
-    async function check() {
-      const pending = alertsRef.current.filter((a) => !a.triggeredAt);
-      if (!pending.length) return;
-
-      // Group by currency to minimise requests.
-      const byCurrency = pending.reduce((acc, a) => {
-        (acc[a.currency] ||= new Set()).add(a.coinId);
-        return acc;
-      }, {});
-
-      const triggered = [];
-      for (const [cur, idSet] of Object.entries(byCurrency)) {
-        try {
-          const data = await getSimplePrice([...idSet], cur);
-          if (cancelled) return;
-          for (const a of pending) {
-            if (a.currency !== cur) continue;
-            const price = data?.[a.coinId]?.[cur];
-            if (price == null) continue;
-            const hit =
-              a.direction === "above" ? price >= a.target : price <= a.target;
-            if (hit) triggered.push({ alert: a, price });
-          }
-        } catch {
-          /* transient errors are fine; we retry next tick */
-        }
-      }
-
-      if (triggered.length && !cancelled) {
-        const now = Date.now();
-        const ids = new Set(triggered.map((t) => t.alert.id));
-        setAlerts((prev) =>
-          prev.map((a) => (ids.has(a.id) ? { ...a, triggeredAt: now } : a))
-        );
-        triggered.forEach((t) => notify(t.alert, t.price));
-      }
-    }
-
-    check();
-    const interval = setInterval(check, POLL_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, [notify]);
-
-  const triggeredCount = useMemo(
-    () => alerts.filter((a) => a.triggeredAt).length,
-    [alerts]
-  );
-
-  const value = useMemo(
-    () => ({
-      alerts,
-      add,
-      remove,
-      reset,
-      clearTriggered,
-      count: alerts.length,
-      pendingCount: alerts.filter((a) => !a.triggeredAt).length,
-      triggeredCount,
-      permission,
-      requestPermission,
-    }),
-    [alerts, add, remove, reset, clearTriggered, triggeredCount, permission, requestPermission]
-  );
-
-  return <AlertsContext.Provider value={value}>{children}</AlertsContext.Provider>;
-}
-
-export function useAlerts() {
-  const ctx = useContext(AlertsContext);
-  if (!ctx) throw new Error("useAlerts must be used within AlertsProvider");
-  return ctx;
+  return {
+    alerts,
+    add,
+    remove,
+    reset,
+    clearTriggered,
+    count: alerts.length,
+    pendingCount: alerts.filter((a) => !a.triggeredAt).length,
+    triggeredCount,
+    permission,
+    requestPermission,
+  };
 }

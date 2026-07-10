@@ -1,35 +1,17 @@
-import { createContext, useContext, useEffect, useState } from "react";
-
-const ThemeContext = createContext(null);
-const STORAGE_KEY = "cryptochecker:theme";
-
-function getInitialTheme() {
-  const stored = localStorage.getItem(STORAGE_KEY);
-  if (stored === "light" || stored === "dark") return stored;
-  const prefersDark = window.matchMedia?.("(prefers-color-scheme: dark)").matches;
-  return prefersDark ? "dark" : "light";
-}
+/**
+ * Theme is now backed by the Redux store (see store/themeSlice.js). This module
+ * is kept as a thin compatibility layer so existing imports of `useTheme` and
+ * `ThemeProvider` continue to work unchanged after the RTK migration.
+ */
+import { useDispatch, useSelector } from "react-redux";
+import { selectTheme, toggleTheme as toggleThemeAction } from "../store/themeSlice.js";
 
 export function ThemeProvider({ children }) {
-  const [theme, setTheme] = useState(getInitialTheme);
-
-  useEffect(() => {
-    document.documentElement.setAttribute("data-theme", theme);
-    localStorage.setItem(STORAGE_KEY, theme);
-  }, [theme]);
-
-  const toggleTheme = () =>
-    setTheme((t) => (t === "dark" ? "light" : "dark"));
-
-  return (
-    <ThemeContext.Provider value={{ theme, toggleTheme }}>
-      {children}
-    </ThemeContext.Provider>
-  );
+  return children;
 }
 
 export function useTheme() {
-  const ctx = useContext(ThemeContext);
-  if (!ctx) throw new Error("useTheme must be used within ThemeProvider");
-  return ctx;
+  const theme = useSelector(selectTheme);
+  const dispatch = useDispatch();
+  return { theme, toggleTheme: () => dispatch(toggleThemeAction()) };
 }

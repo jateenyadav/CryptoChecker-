@@ -1,56 +1,28 @@
+/**
+ * Market-data client.
+ *
+ * After the full-stack migration, the browser talks to our own Django API
+ * (which proxies and caches CoinGecko server-side) instead of hitting
+ * CoinGecko directly. The exported function signatures and return shapes are
+ * unchanged, so existing pages/components keep working. RTK Query
+ * (see ../store/api.js) is used for persisted features (watchlist, portfolio,
+ * alerts, AI insights); these helpers remain for imperative fetches.
+ */
 import axios from "axios";
 
-const BASE_URL = "https://api.coingecko.com/api/v3";
+const API_BASE = (import.meta.env.VITE_API_URL || "").replace(/\/$/, "");
 
 const client = axios.create({
-  baseURL: BASE_URL,
+  baseURL: `${API_BASE}/api`,
   timeout: 15000,
 });
 
-/**
- * Tiny in-memory TTL cache. CoinGecko's public API is rate-limited
- * (~10-30 req/min), so caching responses keeps the UI snappy and avoids 429s.
- */
-const cache = new Map();
-const inflight = new Map();
-
-function cacheKey(url, params) {
-  return `${url}?${JSON.stringify(params ?? {})}`;
-}
-
-async function getCached(url, params, ttl = 60_000) {
-  const key = cacheKey(url, params);
-  const now = Date.now();
-
-  const hit = cache.get(key);
-  if (hit && now - hit.time < ttl) {
-    return hit.data;
-  }
-
-  // De-duplicate concurrent identical requests.
-  if (inflight.has(key)) return inflight.get(key);
-
-  const promise = client
-    .get(url, { params })
-    .then((res) => {
-      cache.set(key, { data: res.data, time: Date.now() });
-      inflight.delete(key);
-      return res.data;
-    })
-    .catch((err) => {
-      inflight.delete(key);
-      // Serve slightly stale data rather than failing, if we have any.
-      if (hit) return hit.data;
-      throw normalizeError(err);
-    });
-
-  inflight.set(key, promise);
-  return promise;
-}
-
 function normalizeError(err) {
   if (err.response?.status === 429) {
-    return new Error("Rate limited by CoinGecko. Please wait a moment and retry.");
+    return new Error("Rate limited. Please wait a moment and retry.");
+  }
+  if (err.response?.status === 502) {
+    return new Error(err.response?.data?.error || "Market provider unavailable.");
   }
   if (err.code === "ECONNABORTED") {
     return new Error("Request timed out. Check your connection and try again.");
@@ -61,6 +33,15 @@ function normalizeError(err) {
   return new Error(err.response?.data?.error || "Failed to load market data.");
 }
 
+async function get(url, params) {
+  try {
+    const res = await client.get(url, { params });
+    return res.data;
+  } catch (err) {
+    throw normalizeError(err);
+  }
+}
+
 /** Paginated market list with sparkline data and % changes. */
 export function getMarkets({
   currency = "usd",
@@ -69,78 +50,46 @@ export function getMarkets({
   ids,
   order = "market_cap_desc",
 } = {}) {
-  return getCached(
-    "/coins/markets",
-    {
-      vs_currency: currency,
-      order,
-      per_page: perPage,
-      page,
-      sparkline: true,
-      price_change_percentage: "1h,24h,7d",
-      ids: ids?.length ? ids.join(",") : undefined,
-    },
-    45_000
-  );
+  return get("/markets", {
+    currency,
+    page,
+    perPage,
+    order,
+    ids: ids?.length ? ids.join(",") : undefined,
+  });
 }
 
 /** Full detail for a single coin. */
 export function getCoin(id) {
-  return getCached(
-    `/coins/${id}`,
-    {
-      localization: false,
-      tickers: false,
-      market_data: true,
-      community_data: false,
-      developer_data: false,
-      sparkline: false,
-    },
-    60_000
-  );
+  return get(`/coins/${id}`);
 }
 
 /** Historical market chart for a coin over `days`. */
 export function getCoinChart(id, { currency = "usd", days = 7 } = {}) {
-  return getCached(
-    `/coins/${id}/market_chart`,
-    { vs_currency: currency, days },
-    60_000
-  );
+  return get(`/coins/${id}/chart`, { currency, days });
 }
 
 /** Global market stats (total cap, volume, BTC dominance). */
 export function getGlobal() {
-  return getCached("/global", {}, 120_000);
+  return get("/global");
 }
 
 /** Trending search coins. */
 export function getTrending() {
-  return getCached("/search/trending", {}, 120_000);
+  return get("/trending");
 }
 
 /** Full-text search across all coins, exchanges, and categories. */
 export function search(query) {
   const q = query?.trim();
   if (!q) return Promise.resolve({ coins: [] });
-  return getCached("/search", { query: q }, 60_000);
+  return get("/search", { q });
 }
 
-/**
- * Lightweight price lookup for arbitrary coin ids in a given currency.
- * Used by the portfolio and converter where we only need the spot price.
- */
+/** Lightweight price lookup for arbitrary coin ids in a given currency. */
 export function getSimplePrice(ids, currency = "usd") {
   if (!ids?.length) return Promise.resolve({});
-  return getCached(
-    "/simple/price",
-    {
-      ids: ids.join(","),
-      vs_currencies: currency,
-      include_24hr_change: true,
-    },
-    45_000
-  );
+  return get("/simple-price", { ids: ids.join(","), currency });
 }
 
 /** A small curated list of coins to seed the converter dropdown quickly. */

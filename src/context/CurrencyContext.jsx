@@ -1,26 +1,17 @@
-import { createContext, useContext, useEffect, useState } from "react";
-
-const CurrencyContext = createContext(null);
-const STORAGE_KEY = "cryptochecker:currency";
+/**
+ * Currency is now backed by the Redux store (see store/currencySlice.js).
+ * Kept as a compatibility layer so existing `useCurrency` / `CurrencyProvider`
+ * imports work unchanged after the RTK migration.
+ */
+import { useDispatch, useSelector } from "react-redux";
+import { selectCurrency, setCurrency as setCurrencyAction } from "../store/currencySlice.js";
 
 export function CurrencyProvider({ children }) {
-  const [currency, setCurrency] = useState(
-    () => localStorage.getItem(STORAGE_KEY) || "usd"
-  );
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, currency);
-  }, [currency]);
-
-  return (
-    <CurrencyContext.Provider value={{ currency, setCurrency }}>
-      {children}
-    </CurrencyContext.Provider>
-  );
+  return children;
 }
 
 export function useCurrency() {
-  const ctx = useContext(CurrencyContext);
-  if (!ctx) throw new Error("useCurrency must be used within CurrencyProvider");
-  return ctx;
+  const currency = useSelector(selectCurrency);
+  const dispatch = useDispatch();
+  return { currency, setCurrency: (c) => dispatch(setCurrencyAction(c)) };
 }

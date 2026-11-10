@@ -4,6 +4,10 @@ A full-stack cryptocurrency market dashboard: live prices, interactive charts, a
 watchlist, portfolio tracking, price alerts, currency switching, and **AI-generated
 market insights**.
 
+[![CryptoChecker demo: live prices, market summary, INR, dark mode, coin chart](docs/demo.gif)](docs/demo.mp4)
+
+▶ [Watch the full 19-second demo with sound](docs/demo.mp4)
+
 - **Frontend:** React 18 + Vite, **Redux Toolkit** + **RTK Query**, React Router, Recharts
 - **Backend:** **Python / Django + Django REST Framework**, **PostgreSQL**
 - **GenAI:** Google Gemini (with a deterministic offline fallback) for market / coin / portfolio insights
